@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="robots" content="noindex, nofollow" />
+<title>Estudio sobre conversaciones con IA</title>
+<!--
+  Página fija del experimento online (exp_online/web).
+  Lee estado.json, que iniciar.ps1 actualiza cada vez que arranca o se
+  cierra el experimento, y comprueba que el enlace responda antes de
+  habilitar el botón. Si la PC se apagó sin avisar, el botón queda
+  deshabilitado en vez de llevar a una página de error.
+-->
+<style>
+  :root {
+    --bg: #ffffff; --card: #ffffff; --soft: #f7f7f8;
+    --text: #0f172a; --text-2: #475569; --muted: #94a3b8;
+    --border: rgba(0, 0, 0, 0.08); --accent: #2563eb; --accent-hover: #1d4ed8;
+    --ok: #15803d; --off: #b45309;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #1a1a1d; --card: #232327; --soft: #141416;
+      --text: #ececf1; --text-2: #a1a1aa; --muted: #71717a;
+      --border: rgba(255, 255, 255, 0.08);
+      --ok: #4ade80; --off: #fbbf24;
+    }
+  }
+  * { box-sizing: border-box; margin: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, sans-serif;
+    background: var(--bg); color: var(--text);
+    min-height: 100vh; display: flex; align-items: center; justify-content: center;
+    padding: 24px; line-height: 1.6;
+  }
+  main {
+    background: var(--card); border: 1px solid var(--border); border-radius: 18px;
+    padding: 40px; max-width: 620px; width: 100%;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.06);
+  }
+  h1 { font-size: 24px; font-weight: 600; line-height: 1.3; margin-bottom: 18px; }
+  p { color: var(--text-2); font-size: 15.5px; }
+  p + p { margin-top: 12px; }
+  strong { color: var(--text); font-weight: 600; }
+  .meta { display: flex; gap: 10px; flex-wrap: wrap; margin: 22px 0 28px; }
+  .meta span {
+    font-size: 13.5px; color: var(--text-2); background: var(--soft);
+    border: 1px solid var(--border); border-radius: 999px; padding: 4px 12px;
+  }
+  .accion { display: flex; flex-direction: column; align-items: flex-start; gap: 12px; }
+  .btn {
+    display: inline-block; background: var(--accent); color: #fff; text-decoration: none;
+    padding: 12px 32px; border-radius: 999px; font-size: 16px; font-weight: 500;
+    transition: background 0.15s ease;
+  }
+  .btn:hover { background: var(--accent-hover); }
+  .btn[aria-disabled="true"] { opacity: 0.45; pointer-events: none; }
+  .estado { font-size: 14px; color: var(--muted); display: flex; align-items: flex-start; gap: 8px; }
+  .estado::before {
+    content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--muted);
+    flex-shrink: 0; margin-top: 0.55em;
+  }
+  .estado.abierto { color: var(--ok); } .estado.abierto::before { background: var(--ok); }
+  .estado.cerrado { color: var(--off); } .estado.cerrado::before { background: var(--off); }
+  @media (max-width: 520px) { main { padding: 28px 22px; } h1 { font-size: 21px; } }
+</style>
+</head>
+<body>
+<main>
+  <h1>Estudio sobre conversaciones con inteligencia artificial</h1>
+
+  <p>
+    Te invitamos a participar en un estudio sobre
+    <strong>cómo las personas evalúan situaciones cotidianas cuando conversan
+    con un asistente de inteligencia artificial</strong>.
+  </p>
+  <p>
+    Vas a responder algunos cuestionarios breves, leer tres situaciones y
+    conversar sobre cada una con una IA. Antes de empezar vas a ver la
+    información completa del estudio y el consentimiento informado.
+  </p>
+
+  <div class="meta">
+    <span>⏱ 30 a 35 minutos</span>
+    <span>Mayores de 18 años</span>
+    <span>Mejor desde una computadora</span>
+  </div>
+
+  <div class="accion">
+    <a id="iniciar" class="btn" href="#" aria-disabled="true" role="button">Iniciar</a>
+    <span id="estado" class="estado" role="status">Comprobando disponibilidad…</span>
+  </div>
+</main>
+
+<script>
+  // Cada cuánto se vuelve a comprobar si el estudio está cerrado (ms).
+  var REVISAR_CADA = 30000;
+  // Tiempo máximo para que responda el experimento (ms).
+  var ESPERA_MAXIMA = 8000;
+
+  var boton = document.getElementById("iniciar");
+  var estado = document.getElementById("estado");
+
+  function mostrar(abierto, enlace) {
+    if (abierto) {
+      boton.href = enlace;
+      boton.setAttribute("aria-disabled", "false");
+      estado.className = "estado abierto";
+      estado.textContent = "Disponible ahora";
+    } else {
+      boton.href = "#";
+      boton.setAttribute("aria-disabled", "true");
+      estado.className = "estado cerrado";
+      estado.textContent =
+        "No disponible en este momento. Probá de nuevo más tarde; esta página se actualiza sola.";
+    }
+  }
+
+  function conLimite(promesa, ms) {
+    return Promise.race([
+      promesa,
+      new Promise(function (_, rechazar) {
+        setTimeout(function () { rechazar(new Error("tiempo agotado")); }, ms);
+      }),
+    ]);
+  }
+
+  async function revisar() {
+    var abierto = false;
+    var enlace = null;
+    try {
+      // ?t= evita que el navegador o la CDN de GitHub devuelvan una copia vieja.
+      var r = await fetch("estado.json?t=" + Date.now(), { cache: "no-store" });
+      var e = await r.json();
+      if (e.abierto && typeof e.enlace === "string" && /^https:\/\//.test(e.enlace)) {
+        enlace = e.enlace.replace(/\/+$/, "");
+        var s = await conLimite(
+          fetch(enlace + "/api/salud", { cache: "no-store" }),
+          ESPERA_MAXIMA
+        );
+        abierto = s.ok && (await s.json()).ok === true;
+      }
+    } catch (err) {
+      abierto = false;
+    }
+    mostrar(abierto, enlace);
+    if (!abierto) setTimeout(revisar, REVISAR_CADA);
+  }
+
+  revisar();
+</script>
+</body>
+</html>
